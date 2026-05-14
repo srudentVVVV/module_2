@@ -18,11 +18,12 @@
 ## Структура проєкту
 
 ```
-module_1/
+module_2/
 ├── main.py              # Точка входу
 ├── config.json          # Налаштування програми
 ├── requirements.txt     # Залежності Python
 ├── README.md            # Цей файл
+├── BugReport.md         # Звіт про виправлення помилок
 ├── src/
 │   ├── __init__.py
 │   ├── kohonen.py       # Алгоритм мережі Кохонена
@@ -37,8 +38,6 @@ module_1/
 │   ├── test_data_loader.py  # Unit-тести завантаження даних
 │   ├── test_config_manager.py # Unit-тести конфігурації
 │   └── test_report.py       # Unit-тести генерації звітів
-├── docs/
-│   └── TESTING.md           # Звіт з тестування, bug reports
 └── output/              # Каталог для звітів, графіків, логів
 ```
 
