@@ -1,0 +1,15 @@
+{
+  "version": "1.0.1",
+  "language": "uk",
+  "theme_color": "#2c3e50",
+  "accent_color": "#3498db",
+  "output_dir": "output",
+  "log_file": "output/app.log",
+  "default_params": {
+    "map_rows": 10,
+    "map_cols": 10,
+    "epochs": 100,
+    "learning_rate": 0.5,
+    "radius": 5.0
+  }
+}
