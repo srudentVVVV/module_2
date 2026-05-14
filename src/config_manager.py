@@ -4,7 +4,7 @@ import os
 
 
 DEFAULT_CONFIG = {
-    "version": "1.0.0",
+    "version": "1.0.2",
     "language": "uk",
     "theme_color": "#2c3e50",
     "accent_color": "#3498db",

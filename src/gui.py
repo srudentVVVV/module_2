@@ -1,6 +1,7 @@
 import os
+import time
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox, scrolledtext, filedialog
 import threading
 import logging
 import numpy as np
@@ -15,6 +16,7 @@ from src.data_loader import DataLoader
 from src.kohonen import KohonenSOM
 from src.report import ReportGenerator
 from src.logger_setup import setup_logger
+from src.experiment_tracker import ExperimentTracker
 
 logger = logging.getLogger("kohonen_app")
 
@@ -62,6 +64,10 @@ class KohonenApp:
         self.report_gen = ReportGenerator(config.get("output_dir", "output"))
         self.data_info = None
         self.is_training = False
+        self._train_start_time: float | None = None
+
+        output_dir = config.get("output_dir", "output")
+        self.tracker = ExperimentTracker(os.path.join(output_dir, "experiments.json"))
 
         self._current_figures = []
 
@@ -73,7 +79,7 @@ class KohonenApp:
     def _setup_window(self):
         """Налаштування головного вікна."""
         self.root.title(
-            f"Класифікація мережею Кохонена v{self.config.get('version', '1.0.0')}"
+            f"Класифікація мережею Кохонена v{self.config.get('version', '1.0.2')}"
         )
         self.root.geometry("1200x800")
         self.root.minsize(900, 600)
@@ -94,6 +100,8 @@ class KohonenApp:
         )
         style.configure("TLabelframe", background="#f5f6fa")
         style.configure("TLabelframe.Label", background="#f5f6fa", font=("Segoe UI", 10, "bold"))
+        style.configure("Treeview", rowheight=50, font=("Segoe UI", 10))
+        style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))
 
     def _create_menu(self):
         """Створити меню."""
@@ -226,12 +234,14 @@ class KohonenApp:
         self.tab_labelmap = ttk.Frame(self.notebook)
         self.tab_error = ttk.Frame(self.notebook)
         self.tab_results = ttk.Frame(self.notebook)
+        self.tab_experiments = ttk.Frame(self.notebook)
 
         self.notebook.add(self.tab_umatrix, text="U-Matrix")
         self.notebook.add(self.tab_hitmap, text="Hit Map")
         self.notebook.add(self.tab_labelmap, text="Карта класів")
         self.notebook.add(self.tab_error, text="Графік помилки")
         self.notebook.add(self.tab_results, text="Результати")
+        self.notebook.add(self.tab_experiments, text="Експерименти")
 
         self.results_text = scrolledtext.ScrolledText(
             self.tab_results, wrap=tk.WORD, font=("Consolas", 10),
@@ -243,6 +253,8 @@ class KohonenApp:
         for tab in [self.tab_umatrix, self.tab_hitmap, self.tab_labelmap, self.tab_error]:
             lbl = ttk.Label(tab, text=placeholder_text, font=("Segoe UI", 12))
             lbl.pack(expand=True)
+
+        self._create_experiments_tab()
 
     def _create_status_bar(self):
         """Статус-бар внизу вікна."""
@@ -275,6 +287,13 @@ class KohonenApp:
             self._log(msg)
             logger.error(msg, exc_info=True)
             messagebox.showerror("Помилка", msg)
+
+        if self.tracker.load_failed:
+            warn = ("Файл experiments.json пошкоджений або містить некоректні дані.\n"
+                    "Журнал експериментів відновлено як порожній.")
+            self._log(f"Попередження: {warn}")
+            logger.warning(warn)
+            messagebox.showwarning("Журнал пошкоджено", warn)
 
     def _validate_params(self) -> dict | None:
         """Валідація параметрів введених користувачем."""
@@ -335,6 +354,7 @@ class KohonenApp:
             return
 
         self.is_training = True
+        self._train_start_time = time.monotonic()
         self.btn_train.config(state=tk.DISABLED)
         self.btn_classify.config(state=tk.DISABLED)
         self.btn_report.config(state=tk.DISABLED)
@@ -398,6 +418,13 @@ class KohonenApp:
         )
         self._log(f"Навчання завершено. Помилка: {final_error:.6f}, Точність: {accuracy:.2%}")
         logger.info("Точність класифікації: %.4f", accuracy)
+
+        training_time = (
+            time.monotonic() - self._train_start_time
+            if self._train_start_time is not None else 0.0
+        )
+        self.tracker.add_experiment(self.current_params, accuracy, final_error, training_time)
+        self._refresh_experiments_tab()
 
         self._show_visualizations(errors, accuracy)
 
@@ -607,6 +634,111 @@ class KohonenApp:
 
         self._log("Мережу скинуто. Параметри відновлено за замовчуванням.")
         logger.info("Скидання мережі")
+
+    def _create_experiments_tab(self):
+        """Побудувати вкладку «Експерименти» з таблицею результатів."""
+        toolbar = ttk.Frame(self.tab_experiments)
+        toolbar.pack(fill=tk.X, padx=5, pady=(5, 0))
+
+        ttk.Button(toolbar, text="Експортувати CSV",
+                   command=self._export_experiments_csv).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="Очистити журнал",
+                   command=self._clear_experiments).pack(side=tk.LEFT, padx=2)
+
+        tree_frame = ttk.Frame(self.tab_experiments)
+        tree_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        columns = ("id", "timestamp", "map", "epochs", "lr", "radius",
+                   "accuracy", "error", "time")
+        self.experiments_tree = ttk.Treeview(
+            tree_frame, columns=columns, show="headings", height=15,
+        )
+
+        col_defs = [
+            ("id",        "#",          40,  40, tk.CENTER),
+            ("timestamp", "Дата/час",  145, 130, tk.CENTER),
+            ("map",       "Карта",      75,  65, tk.CENTER),
+            ("epochs",    "Епохи",      65,  55, tk.CENTER),
+            ("lr",        "LR",         65,  55, tk.CENTER),
+            ("radius",    "Радіус",     70,  60, tk.CENTER),
+            ("accuracy",  "Точність",   90,  75, tk.CENTER),
+            ("error",     "Помилка",   105,  90, tk.CENTER),
+            ("time",      "Час (с)",    80,  65, tk.CENTER),
+        ]
+        for col_id, heading, width, minwidth, anchor in col_defs:
+            self.experiments_tree.heading(col_id, text=heading)
+            self.experiments_tree.column(
+                col_id, width=width, minwidth=minwidth, anchor=anchor, stretch=True,
+            )
+
+        vsb = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL,
+                            command=self.experiments_tree.yview)
+        self.experiments_tree.configure(yscrollcommand=vsb.set)
+        self.experiments_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.experiments_tree.tag_configure("best", background="#d5f5e3")
+
+        self._refresh_experiments_tab()
+
+    def _refresh_experiments_tab(self):
+        """Перемалювати таблицю з поточним вмістом журналу."""
+        for row in self.experiments_tree.get_children():
+            self.experiments_tree.delete(row)
+
+        records = self.tracker.get_all()
+        best = self.tracker.get_best()
+
+        for rec in records:
+            p = rec["params"]
+            is_best = best is not None and rec["id"] == best["id"]
+            tags = ("best",) if is_best else ()
+            self.experiments_tree.insert("", tk.END, tags=tags, values=(
+                rec["id"],
+                rec["timestamp"],
+                f"{p['map_rows']}×{p['map_cols']}",
+                p["epochs"],
+                p["learning_rate"],
+                p["radius"],
+                f"{rec['accuracy']:.2%}",
+                f"{rec['final_error']:.6f}",
+                rec["training_time"],
+            ))
+
+        children = self.experiments_tree.get_children()
+        if children:
+            self.experiments_tree.see(children[-1])
+
+    def _export_experiments_csv(self):
+        """Зберегти журнал у CSV через діалог вибору файлу."""
+        if not self.tracker.get_all():
+            messagebox.showinfo("Журнал порожній", "Немає експериментів для експорту.")
+            return
+        path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV файли", "*.csv"), ("Усі файли", "*.*")],
+            initialfile="experiments.csv",
+            title="Зберегти журнал експериментів",
+        )
+        if not path:
+            return
+        try:
+            self.tracker.export_csv(path)
+            messagebox.showinfo("Збережено", f"Журнал експортовано:\n{path}")
+            self._log(f"Журнал експериментів збережено: {path}")
+        except Exception as e:
+            messagebox.showerror("Помилка", str(e))
+
+    def _clear_experiments(self):
+        """Очистити весь журнал після підтвердження."""
+        if not self.tracker.get_all():
+            messagebox.showinfo("Журнал порожній", "Журнал вже порожній.")
+            return
+        if not messagebox.askyesno("Підтвердження", "Очистити весь журнал експериментів?"):
+            return
+        self.tracker.clear()
+        self._refresh_experiments_tab()
+        self._log("Журнал експериментів очищено.")
 
     def _log(self, message: str):
         """Додати повідомлення у журнал подій GUI."""

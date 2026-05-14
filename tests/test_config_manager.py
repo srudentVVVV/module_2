@@ -38,7 +38,7 @@ class TestConfigManagerNormal(unittest.TestCase):
     def test_get_existing_key(self):
         """TC-C03: Отримання значення існуючого ключа."""
         cm = ConfigManager(self.config_path)
-        self.assertEqual(cm.get("version"), "1.0.0")
+        self.assertEqual(cm.get("version"), "1.0.2")
 
     def test_get_missing_key_default(self):
         """TC-C04: Отримання неіснуючого ключа — повертає default."""
